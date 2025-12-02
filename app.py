@@ -27,13 +27,13 @@ def parse_payroll_data(raw_text):
         return pd.DataFrame()
 
     # Regex for Employee Name (Assuming names follow the pattern: Lastname, Firstname MiddleName)
-    # The pattern should be broad to catch variations like Kapamba, Kayoka Bovick
     name_pattern = re.compile(r"^([A-Z][a-z]+(?:-\s?[A-Z][a-z]+)?, [A-Z].*)$", re.MULTILINE)
 
-    # Regex for Data Line (CSV-like structure)
-    # We still use the date pattern to identify lines containing payroll data, 
-    # as the PDF text extractor places a newline within the quoted date field.
-    date_pattern = re.compile(r'^"(\d{4}-\d{2}-\d{2})\n"')
+    # General Date Pattern (YYYY-MM-DD)
+    date_regex = re.compile(r'\d{4}-\d{2}-\d{2}')
+    
+    # Currency Pattern (R X,XXX.XX)
+    currency_regex = re.compile(r"R\s*[\d,]+\.\d{2}")
 
     all_data = []
     current_employee = "Unknown Employee"
@@ -50,34 +50,37 @@ def parse_payroll_data(raw_text):
             current_employee = name_match.group(1).strip()
             continue
 
-        # 2. Check for Data Line
-        date_match = date_pattern.match(line)
-        if date_match:
-            # Normalize and split the line by comma. The normalization step is key here.
+        # 2. Check for Data Line using flexible patterns
+        
+        # A line must start with a date...
+        date_match = date_regex.match(line)
+        
+        # ...AND it must contain at least two currency values (Gross Remuneration and Nett Pay)
+        currency_values = currency_regex.findall(line)
+        
+        if date_match and len(currency_values) >= 2:
+            # This line is a potential payroll data record. We now clean it.
             
-            # Remove the quotes and internal newlines for simpler processing
+            # Remove any enclosing quotes and internal newlines for simpler processing
+            # This handles both the "quoted, comma-separated" and "simple space-separated" formats
             cleaned_line = line.replace('"', '').replace('\n', '').strip()
             
-            # Split by comma to reliably get the date (which is always the first field)
-            fields = [f.strip() for f in cleaned_line.split(',')]
+            # Re-find currency values from the cleaned line for reliability
+            currency_values = currency_regex.findall(cleaned_line)
             
-            # Use a robust pattern to find currency values, which are less likely to shift
-            # Currency pattern: R followed by digits, optional commas, and two decimal places
-            currency_values = re.findall(r"R\s*[\d,]+\.\d{2}", cleaned_line)
-
+            # The date is the first item that matches the date pattern at the start of the line
+            date = date_match.group(0)
+            
             # Gross Remuneration is reliably the second to last currency value (before Nett Pay)
-            if len(fields) >= 1 and len(currency_values) >= 2:
-                date = fields[0]
-                gross_remuneration = currency_values[-2] # Gross Remuneration is the second to last currency amount
+            if len(currency_values) >= 2:
+                gross_remuneration = currency_values[-2]
                 
-                # Final check for valid date format
-                if re.match(r"\d{4}-\d{2}-\d{2}", date):
-                    all_data.append({
-                        "Employee Name": current_employee,
-                        "Date": date,
-                        "Gross Remuneration": gross_remuneration
-                    })
-                
+                all_data.append({
+                    "Employee Name": current_employee,
+                    "Date": date,
+                    "Gross Remuneration": gross_remuneration
+                })
+        
     # Create DataFrame
     df = pd.DataFrame(all_data)
 
@@ -139,7 +142,7 @@ st.set_page_config(
 st.title("💰 Payroll Data Extractor (AI-Enhanced Parsing)")
 st.markdown("Upload your payroll PDF report to extract and summarize **Employee Name**, **Date**, and **Gross Remuneration** into a single CSV file.")
 
-st.warning("⚠️ **Improved Robustness:** The parsing logic now uses flexible pattern matching (like an internal AI) to find the currency fields, making it much less reliant on exact column positions.")
+st.warning("⚠️ **Maximum Robustness:** The parsing logic has been further generalized to look for a date at the start of the line **AND** at least two currency values (`R X,XXX.XX`) to correctly identify the Gross Remuneration and handle variations in spacing/delimiters.")
 
 # File Uploader
 uploaded_file = st.file_uploader(
