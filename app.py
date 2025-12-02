@@ -33,8 +33,9 @@ def parse_payroll_data(raw_text):
     # Regex for Data Line (CSV-like structure)
     # This pattern captures the date (Field 1) and the Gross Remuneration (Field 9)
     # It relies on splitting the line by the quoted separator `","` or unquoted `,`
+    # The pattern is updated to match the extracted format, e.g., "2024-03-31\n"
     # Field indices: 1-Date, 9-Gross Remuneration
-    date_pattern = re.compile(r'"(\d{4}-\d{2}-\d{2})"')
+    date_pattern = re.compile(r'^"(\d{4}-\d{2}-\d{2})\n"') # FIX: Added \n to match extracted text
 
     all_data = []
     current_employee = "Unknown Employee"
@@ -59,20 +60,16 @@ def parse_payroll_data(raw_text):
         date_match = date_pattern.match(line)
         if date_match:
             # Normalize and split the line by comma, trying to handle quotes
-            # A simple approach: remove quotes and split by comma to get fields
+            # A simple approach: remove quotes and newlines for simpler splitting
             
-            # Remove the quotes for simpler splitting, then split by comma
+            # Remove the quotes and internal newlines
             cleaned_line = line.replace('"', '').replace('\n', '').strip()
             
             # The structure appears to be: Date, Basic Salary, Loan Repayment, Tax (PAYE), UIF - Employee, SDL - Employer, UIF - Employer, Gross Remuneration Taxable, Gross Remuneration, Nett Pay
-            # Gross Remuneration is the 9th column (index 8)
-            fields = [f.strip() for f in cleaned_line.split(',') if f.strip()]
+            # Gross Remuneration is the 9th column (index 8). Crucially, we keep empty fields to maintain index integrity.
+            fields = [f.strip() for f in cleaned_line.split(',')] # FIX: Removed `if f.strip()` to preserve empty columns
             
-            # Since the number of empty fields (like Loan Repayment, Tax PAYE) varies,
-            # we count backward from the end where the columns seem to be more consistent:
-            # [..., Gross Remuneration, Nett Pay]
-            # Gross Remuneration is the second to last main figure.
-            
+            # Since the number of fields should be 10, we check for a minimum length
             if len(fields) >= 10:
                 date = fields[0]
                 # Gross Remuneration is the 9th element (index 8) in the 10-column set
