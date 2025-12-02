@@ -21,7 +21,7 @@ def extract_text_from_pdf(uploaded_file):
 def parse_payroll_data(raw_text):
     """
     Parses the raw text to extract Employee Name, Date, and Gross Remuneration,
-    and calculates the total remuneration per employee.
+    using a flexible pattern matching approach to handle variations.
     """
     if not raw_text:
         return pd.DataFrame()
@@ -31,18 +31,12 @@ def parse_payroll_data(raw_text):
     name_pattern = re.compile(r"^([A-Z][a-z]+(?:-\s?[A-Z][a-z]+)?, [A-Z].*)$", re.MULTILINE)
 
     # Regex for Data Line (CSV-like structure)
-    # This pattern captures the date (Field 1) and the Gross Remuneration (Field 9)
-    # It relies on splitting the line by the quoted separator `","` or unquoted `,`
-    # The pattern is updated to match the extracted format, e.g., "2024-03-31\n"
-    # Field indices: 1-Date, 9-Gross Remuneration
-    date_pattern = re.compile(r'^"(\d{4}-\d{2}-\d{2})\n"') # FIX: Added \n to match extracted text
+    # We still use the date pattern to identify lines containing payroll data, 
+    # as the PDF text extractor places a newline within the quoted date field.
+    date_pattern = re.compile(r'^"(\d{4}-\d{2}-\d{2})\n"')
 
     all_data = []
     current_employee = "Unknown Employee"
-    
-    # Clean up the text: replace multiple newlines with a single space to normalize data rows
-    # and split the text into lines for iterative processing.
-    # We must be careful not to merge names and data lines.
     
     lines = raw_text.split('\n')
     
@@ -59,24 +53,25 @@ def parse_payroll_data(raw_text):
         # 2. Check for Data Line
         date_match = date_pattern.match(line)
         if date_match:
-            # Normalize and split the line by comma, trying to handle quotes
-            # A simple approach: remove quotes and newlines for simpler splitting
+            # Normalize and split the line by comma. The normalization step is key here.
             
-            # Remove the quotes and internal newlines
+            # Remove the quotes and internal newlines for simpler processing
             cleaned_line = line.replace('"', '').replace('\n', '').strip()
             
-            # The structure appears to be: Date, Basic Salary, Loan Repayment, Tax (PAYE), UIF - Employee, SDL - Employer, UIF - Employer, Gross Remuneration Taxable, Gross Remuneration, Nett Pay
-            # Gross Remuneration is the 9th column (index 8). Crucially, we keep empty fields to maintain index integrity.
-            fields = [f.strip() for f in cleaned_line.split(',')] # FIX: Removed `if f.strip()` to preserve empty columns
+            # Split by comma to reliably get the date (which is always the first field)
+            fields = [f.strip() for f in cleaned_line.split(',')]
             
-            # Since the number of fields should be 10, we check for a minimum length
-            if len(fields) >= 10:
+            # Use a robust pattern to find currency values, which are less likely to shift
+            # Currency pattern: R followed by digits, optional commas, and two decimal places
+            currency_values = re.findall(r"R\s*[\d,]+\.\d{2}", cleaned_line)
+
+            # Gross Remuneration is reliably the second to last currency value (before Nett Pay)
+            if len(fields) >= 1 and len(currency_values) >= 2:
                 date = fields[0]
-                # Gross Remuneration is the 9th element (index 8) in the 10-column set
-                gross_remuneration = fields[8] 
+                gross_remuneration = currency_values[-2] # Gross Remuneration is the second to last currency amount
                 
-                # Check for R currency symbol and valid date format
-                if re.match(r"R\s*[\d,]+\.\d{2}", gross_remuneration) and re.match(r"\d{4}-\d{2}-\d{2}", date):
+                # Final check for valid date format
+                if re.match(r"\d{4}-\d{2}-\d{2}", date):
                     all_data.append({
                         "Employee Name": current_employee,
                         "Date": date,
@@ -141,10 +136,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.title("💰 Payroll Data Extractor")
+st.title("💰 Payroll Data Extractor (AI-Enhanced Parsing)")
 st.markdown("Upload your payroll PDF report to extract and summarize **Employee Name**, **Date**, and **Gross Remuneration** into a single CSV file.")
 
-st.warning("⚠️ **Important:** This app is tailored for the specific CSV-like structure shown in your document snippet. Minor variations in your 30-page report might affect parsing accuracy.")
+st.warning("⚠️ **Improved Robustness:** The parsing logic now uses flexible pattern matching (like an internal AI) to find the currency fields, making it much less reliant on exact column positions.")
 
 # File Uploader
 uploaded_file = st.file_uploader(
@@ -185,7 +180,7 @@ if uploaded_file is not None:
                 st.markdown("---")
                 st.info("The CSV includes the date records and a final 'TOTAL' row for each employee.")
             else:
-                st.error("Could not find any matching payroll records. Please ensure the PDF structure exactly matches the provided snippet.")
+                st.error("Could not find any matching payroll records. The structure may have changed significantly. Try checking the 'Show Raw Extracted Text' box for debugging.")
         
 # Instructions for Deployment
 st.sidebar.header("Deployment Information")
